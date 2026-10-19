@@ -1,8 +1,10 @@
+
 """Capture TCP SYN packets and forward them to the IDS detector."""
 
 import logging
 
 from scapy.all import IP, TCP, sniff
+from scapy.error import Scapy_Exception
 from scapy.packet import Packet
 
 from network_ids.detector import Alert, NetworkIDS
@@ -70,4 +72,7 @@ def start_capture(
         logger.info("Packet capture stopped by user")
     except PermissionError:
         logger.exception("Packet capture requires appropriate permissions")
+        raise
+    except Scapy_Exception:
+        logger.exception("Scapy failed to capture packets")
         raise
