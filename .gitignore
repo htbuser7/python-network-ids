@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+
+# Testing
+.pytest_cache/
+
+# Secrets
+.env
+
+# Network captures
+*.pcap
+*.pcapng
