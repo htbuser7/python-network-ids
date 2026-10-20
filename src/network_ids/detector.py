@@ -1,4 +1,3 @@
-
 """Detect basic network threats using TCP packet observations."""
 
 import logging
@@ -57,10 +56,12 @@ class NetworkIDS:
         self.syn_threshold = syn_threshold
         self.logger = logger or logging.getLogger("network_ids")
 
+        # PORT_SCAN state: one tracker per source/destination pair.
         self._observations = defaultdict(deque)
         self._last_timestamps = {}
         self._alert_active = set()
 
+        # SYN_FLOOD state: one tracker per source IP, across destinations.
         self._syn_observations = defaultdict(deque)
         self._syn_alert_active = set()
 
@@ -102,21 +103,28 @@ class NetworkIDS:
         cutoff = now - self.window_seconds
         alerts = []
 
-        # Track SYN observations for the SYN_FLOOD rule.
-        syn_observations = self._syn_observations[key]
-        while syn_observations and syn_observations[0] < cutoff:
-            syn_observations.popleft()
+        # SYN_FLOOD: aggregate SYN observations by source IP.
+        # This includes packets sent to different destination IPs.
+        syn_observations = self._syn_observations[source_ip]
 
+        # Filter every entry instead of assuming timestamps from different
+        # destinations always arrive in chronological order.
+        syn_observations = deque(
+            observed_at
+            for observed_at in syn_observations
+            if observed_at >= cutoff
+        )
+        self._syn_observations[source_ip] = syn_observations
         syn_observations.append(now)
 
         if len(syn_observations) < self.syn_threshold:
-            self._syn_alert_active.discard(key)
+            self._syn_alert_active.discard(source_ip)
 
         if (
             len(syn_observations) >= self.syn_threshold
-            and key not in self._syn_alert_active
+            and source_ip not in self._syn_alert_active
         ):
-            self._syn_alert_active.add(key)
+            self._syn_alert_active.add(source_ip)
 
             alert = Alert(
                 source_ip=source_ip,
@@ -124,22 +132,25 @@ class NetworkIDS:
                 rule="SYN_FLOOD",
                 details=(
                     f"{len(syn_observations)} TCP SYN packets observed "
-                    f"within {self.window_seconds:g} seconds"
+                    f"from this source within {self.window_seconds:g} "
+                    "seconds, across destinations"
                 ),
             )
             alerts.append(alert)
 
             self.logger.warning(
-                "Possible SYN flood detected: source=%s destination=%s "
-                "syn_packets=%d window_seconds=%g",
+                "Possible SYN flood detected: source=%s "
+                "current_destination=%s syn_packets=%d "
+                "window_seconds=%g",
                 alert.source_ip,
                 alert.destination_ip,
                 len(syn_observations),
                 self.window_seconds,
             )
 
-        # Track unique destination ports for the PORT_SCAN rule.
+        # PORT_SCAN: track unique destination ports per source/destination.
         observations = self._observations[key]
+
         while observations and observations[0][0] < cutoff:
             observations.popleft()
 

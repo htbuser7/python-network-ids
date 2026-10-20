@@ -1,4 +1,3 @@
-
 """Tests for network threat detection."""
 
 import unittest
@@ -12,17 +11,12 @@ class TestNetworkIDS(unittest.TestCase):
     def test_detects_port_scan(self):
         ids = NetworkIDS(port_threshold=3, window_seconds=60)
 
-        self.assertEqual(
-            ids.observe("10.0.0.5", "10.0.0.10", 22, 1), []
-        )
-        self.assertEqual(
-            ids.observe("10.0.0.5", "10.0.0.10", 80, 2), []
-        )
+        ids.observe("10.0.0.5", "10.0.0.10", 22, 1)
+        ids.observe("10.0.0.5", "10.0.0.10", 80, 2)
 
         alerts = ids.observe("10.0.0.5", "10.0.0.10", 443, 3)
 
-        self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0].rule, "PORT_SCAN")
+        self.assertEqual([a.rule for a in alerts], ["PORT_SCAN"])
         self.assertEqual(alerts[0].source_ip, "10.0.0.5")
         self.assertEqual(alerts[0].destination_ip, "10.0.0.10")
         self.assertIn("3 distinct destination ports", alerts[0].details)
@@ -53,35 +47,27 @@ class TestNetworkIDS(unittest.TestCase):
         ids.observe("10.0.0.5", "10.0.0.10", 22, 1)
         ids.observe("10.0.0.5", "10.0.0.10", 80, 2)
 
-        first_alerts = ids.observe(
-            "10.0.0.5", "10.0.0.10", 443, 3
-        )
-        second_alerts = ids.observe(
-            "10.0.0.5", "10.0.0.10", 8080, 4
-        )
+        first = ids.observe("10.0.0.5", "10.0.0.10", 443, 3)
+        second = ids.observe("10.0.0.5", "10.0.0.10", 8080, 4)
 
-        self.assertEqual([alert.rule for alert in first_alerts], ["PORT_SCAN"])
-        self.assertEqual(second_alerts, [])
+        self.assertEqual([a.rule for a in first], ["PORT_SCAN"])
+        self.assertEqual(second, [])
 
     def test_detection_can_rearm_after_window_expires(self):
         ids = NetworkIDS(port_threshold=2, window_seconds=10)
 
         ids.observe("10.0.0.5", "10.0.0.10", 22, 1)
-        first_alerts = ids.observe(
-            "10.0.0.5", "10.0.0.10", 80, 2
-        )
-        self.assertEqual([alert.rule for alert in first_alerts], ["PORT_SCAN"])
+        first = ids.observe("10.0.0.5", "10.0.0.10", 80, 2)
+
+        self.assertEqual([a.rule for a in first], ["PORT_SCAN"])
 
         ids.observe("10.0.0.5", "10.0.0.10", 443, 20)
-        second_alerts = ids.observe(
-            "10.0.0.5", "10.0.0.10", 8080, 21
-        )
+        second = ids.observe("10.0.0.5", "10.0.0.10", 8080, 21)
 
-        self.assertEqual([alert.rule for alert in second_alerts], ["PORT_SCAN"])
+        self.assertEqual([a.rule for a in second], ["PORT_SCAN"])
 
     def test_out_of_order_timestamp_is_rejected(self):
         ids = NetworkIDS(port_threshold=3, window_seconds=60)
-
         ids.observe("10.0.0.5", "10.0.0.10", 22, 10)
 
         with self.assertRaisesRegex(ValueError, "non-decreasing"):
@@ -93,9 +79,7 @@ class TestNetworkIDS(unittest.TestCase):
         for timestamp in (float("nan"), float("inf"), float("-inf")):
             with self.subTest(timestamp=timestamp):
                 with self.assertRaisesRegex(ValueError, "finite"):
-                    ids.observe(
-                        "10.0.0.5", "10.0.0.10", 80, timestamp
-                    )
+                    ids.observe("10.0.0.5", "10.0.0.10", 80, timestamp)
 
     def test_invalid_port_is_rejected(self):
         ids = NetworkIDS()
@@ -124,49 +108,34 @@ class TestNetworkIDS(unittest.TestCase):
 
     def test_detects_syn_flood(self):
         ids = NetworkIDS(
-            port_threshold=10,
-            syn_threshold=3,
-            window_seconds=60,
+            port_threshold=10, syn_threshold=3, window_seconds=60
         )
 
-        self.assertEqual(
-            ids.observe("10.0.0.5", "10.0.0.10", 80, 1), []
-        )
-        self.assertEqual(
-            ids.observe("10.0.0.5", "10.0.0.10", 80, 2), []
-        )
-
+        ids.observe("10.0.0.5", "10.0.0.10", 80, 1)
+        ids.observe("10.0.0.5", "10.0.0.10", 80, 2)
         alerts = ids.observe("10.0.0.5", "10.0.0.10", 80, 3)
 
-        self.assertEqual([alert.rule for alert in alerts], ["SYN_FLOOD"])
+        self.assertEqual([a.rule for a in alerts], ["SYN_FLOOD"])
         self.assertEqual(alerts[0].source_ip, "10.0.0.5")
         self.assertEqual(alerts[0].destination_ip, "10.0.0.10")
         self.assertIn("3 TCP SYN packets", alerts[0].details)
 
     def test_syn_flood_alert_rearms_after_window_expires(self):
         ids = NetworkIDS(
-            port_threshold=10,
-            syn_threshold=2,
-            window_seconds=10,
+            port_threshold=10, syn_threshold=2, window_seconds=10
         )
 
         ids.observe("10.0.0.5", "10.0.0.10", 80, 1)
-        first_alerts = ids.observe(
-            "10.0.0.5", "10.0.0.10", 80, 2
-        )
-        self.assertEqual([alert.rule for alert in first_alerts], ["SYN_FLOOD"])
+        first = ids.observe("10.0.0.5", "10.0.0.10", 80, 2)
+        self.assertEqual([a.rule for a in first], ["SYN_FLOOD"])
 
         ids.observe("10.0.0.5", "10.0.0.10", 80, 20)
-        second_alerts = ids.observe(
-            "10.0.0.5", "10.0.0.10", 80, 21
-        )
-        self.assertEqual([alert.rule for alert in second_alerts], ["SYN_FLOOD"])
+        second = ids.observe("10.0.0.5", "10.0.0.10", 80, 21)
+        self.assertEqual([a.rule for a in second], ["SYN_FLOOD"])
 
     def test_syn_flood_does_not_trigger_below_threshold(self):
         ids = NetworkIDS(
-            port_threshold=10,
-            syn_threshold=4,
-            window_seconds=60,
+            port_threshold=10, syn_threshold=4, window_seconds=60
         )
 
         for timestamp in range(1, 4):
@@ -176,20 +145,36 @@ class TestNetworkIDS(unittest.TestCase):
 
         self.assertEqual(alerts, [])
 
+    def test_syn_flood_counts_multiple_destinations_per_source(self):
+        ids = NetworkIDS(
+            port_threshold=10, syn_threshold=3, window_seconds=60
+        )
+
+        self.assertEqual(
+            ids.observe("10.0.0.5", "10.0.0.10", 80, 1), []
+        )
+        self.assertEqual(
+            ids.observe("10.0.0.5", "10.0.0.20", 80, 2), []
+        )
+
+        alerts = ids.observe("10.0.0.5", "10.0.0.30", 80, 3)
+        syn_alerts = [a for a in alerts if a.rule == "SYN_FLOOD"]
+
+        self.assertEqual(len(syn_alerts), 1)
+        self.assertEqual(syn_alerts[0].source_ip, "10.0.0.5")
+        self.assertIn("3 TCP SYN packets", syn_alerts[0].details)
+
     def test_both_rules_can_trigger_on_same_observation(self):
         ids = NetworkIDS(
-            port_threshold=3,
-            syn_threshold=3,
-            window_seconds=60,
+            port_threshold=3, syn_threshold=3, window_seconds=60
         )
 
         ids.observe("10.0.0.5", "10.0.0.10", 22, 1)
         ids.observe("10.0.0.5", "10.0.0.10", 80, 2)
-
         alerts = ids.observe("10.0.0.5", "10.0.0.10", 443, 3)
 
         self.assertEqual(
-            {alert.rule for alert in alerts},
+            {a.rule for a in alerts},
             {"SYN_FLOOD", "PORT_SCAN"},
         )
 
