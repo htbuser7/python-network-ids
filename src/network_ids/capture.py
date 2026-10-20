@@ -1,6 +1,9 @@
+
 """Capture live TCP traffic and analyze packets from PCAP files."""
 
+import json
 import logging
+from dataclasses import asdict
 from pathlib import Path
 
 from scapy.all import IP, TCP, sniff
@@ -52,17 +55,42 @@ def process_packet(
     return alert
 
 
+def write_json_report(
+    report_file: str | Path,
+    packet_count: int,
+    alerts: list[Alert],
+) -> None:
+    """Write packet analysis results and detected alerts to a JSON file."""
+    report_path = Path(report_file)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    report = {
+        "packets_analyzed": packet_count,
+        "alert_count": len(alerts),
+        "alerts": [asdict(alert) for alert in alerts],
+    }
+
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    logger.info("Analysis report written to %s", report_path)
+
+
 def analyze_pcap(
     pcap_file: str | Path,
     detector: NetworkIDS,
+    alerts: list[Alert] | None = None,
 ) -> int:
-    """Analyze packets in a PCAP file and return the number of packets read."""
+    """Analyze a PCAP, return its packet count, and optionally collect alerts."""
     path = Path(pcap_file)
 
     if not path.is_file():
         raise FileNotFoundError(f"PCAP file not found: {path}")
 
     packet_count = 0
+    collected_alerts = alerts if alerts is not None else []
 
     logger.info("Starting PCAP analysis: %s", path)
 
@@ -70,7 +98,9 @@ def analyze_pcap(
         with PcapReader(str(path)) as reader:
             for packet in reader:
                 packet_count += 1
-                process_packet(packet, detector)
+                alert = process_packet(packet, detector)
+                if alert is not None:
+                    collected_alerts.append(alert)
     except (Scapy_Exception, OSError):
         logger.exception("Failed to analyze PCAP file: %s", path)
         raise

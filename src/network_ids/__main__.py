@@ -7,7 +7,7 @@ import logging
 from scapy.all import get_if_list
 from scapy.error import Scapy_Exception
 
-from network_ids.capture import analyze_pcap, start_capture
+from network_ids.capture import analyze_pcap, start_capture, write_json_report
 from network_ids.detector import NetworkIDS
 from network_ids.logging_config import configure_logging
 
@@ -44,6 +44,11 @@ def parse_args() -> argparse.Namespace:
         metavar="FILE",
         help="Analyze packets from a PCAP file instead of capturing live traffic",
     )
+    parser.add_argument(
+        "--report",
+        metavar="FILE",
+        help="Write a JSON report for PCAP analysis",
+    )
     return parser.parse_args()
 
 
@@ -55,6 +60,10 @@ def main() -> None:
         for interface in get_if_list():
             print(interface)
         return
+
+    if args.report and not args.pcap:
+        print("--report requires --pcap", file=__import__("sys").stderr)
+        raise SystemExit(2)
 
     logger = configure_logging()
 
@@ -70,15 +79,19 @@ def main() -> None:
 
     if args.pcap:
         logger.info("Starting PCAP analysis: %s", args.pcap)
+        alerts = []
         try:
-            packet_count = analyze_pcap(args.pcap, detector)
+            packet_count = analyze_pcap(args.pcap, detector, alerts=alerts)
+            if args.report:
+                write_json_report(args.report, packet_count, alerts)
         except (FileNotFoundError, OSError, Scapy_Exception) as exc:
             logger.error("PCAP analysis failed: %s", exc)
             raise SystemExit(1) from exc
 
         logger.info(
-            "PCAP analysis finished: %d packets processed",
+            "PCAP analysis finished: %d packets processed; %d alerts",
             packet_count,
+            len(alerts),
         )
         return
 

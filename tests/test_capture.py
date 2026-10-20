@@ -1,4 +1,4 @@
-
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +8,12 @@ from scapy.all import IP, TCP, UDP
 from scapy.error import Scapy_Exception
 from scapy.utils import PcapWriter
 
-from network_ids.capture import analyze_pcap, process_packet, start_capture
+from network_ids.capture import (
+    analyze_pcap,
+    process_packet,
+    start_capture,
+    write_json_report,
+)
 from network_ids.detector import NetworkIDS
 
 
@@ -93,6 +98,45 @@ class TestPacketCapture(unittest.TestCase):
             count = analyze_pcap(pcap_path, self.ids)
 
         self.assertEqual(count, 1)
+
+    def test_json_report_contains_packet_count_and_alerts(self):
+        from network_ids.detector import Alert
+
+        alerts = [
+            Alert(
+                source_ip="10.0.0.5",
+                destination_ip="10.0.0.10",
+                rule="PORT_SCAN",
+                details="3 distinct destination ports observed within 60 seconds",
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "reports" / "report.json"
+
+            write_json_report(report_path, 3, alerts)
+
+            with report_path.open(encoding="utf-8") as report_file:
+                report = json.load(report_file)
+
+        self.assertEqual(report["packets_analyzed"], 3)
+        self.assertEqual(report["alert_count"], 1)
+        self.assertEqual(len(report["alerts"]), 1)
+        self.assertEqual(report["alerts"][0]["rule"], "PORT_SCAN")
+        self.assertEqual(report["alerts"][0]["source_ip"], "10.0.0.5")
+
+    def test_json_report_without_alerts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_path = Path(temp_dir) / "report.json"
+
+            write_json_report(report_path, 3, [])
+
+            with report_path.open(encoding="utf-8") as report_file:
+                report = json.load(report_file)
+
+        self.assertEqual(report["packets_analyzed"], 3)
+        self.assertEqual(report["alert_count"], 0)
+        self.assertEqual(report["alerts"], [])
 
     def test_analyze_missing_pcap_raises_error(self):
         with self.assertRaises(OSError):
