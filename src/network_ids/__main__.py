@@ -5,8 +5,9 @@ import argparse
 import logging
 
 from scapy.all import get_if_list
+from scapy.error import Scapy_Exception
 
-from network_ids.capture import start_capture
+from network_ids.capture import analyze_pcap, start_capture
 from network_ids.detector import NetworkIDS
 from network_ids.logging_config import configure_logging
 
@@ -38,11 +39,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="List available network interfaces and exit",
     )
+    parser.add_argument(
+        "--pcap",
+        metavar="FILE",
+        help="Analyze packets from a PCAP file instead of capturing live traffic",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
-    """Configure and start the IDS."""
+    """Configure and run the IDS."""
     args = parse_args()
 
     if args.list_interfaces:
@@ -51,6 +57,7 @@ def main() -> None:
         return
 
     logger = configure_logging()
+
     try:
         detector = NetworkIDS(
             port_threshold=args.threshold,
@@ -58,11 +65,28 @@ def main() -> None:
             logger=logger,
         )
     except ValueError as exc:
-        logging.error("Invalid configuration: %s", exc)
+        logger.error("Invalid configuration: %s", exc)
         raise SystemExit(2) from exc
 
+    if args.pcap:
+        logger.info("Starting PCAP analysis: %s", args.pcap)
+        try:
+            packet_count = analyze_pcap(args.pcap, detector)
+        except (FileNotFoundError, OSError, Scapy_Exception) as exc:
+            logger.error("PCAP analysis failed: %s", exc)
+            raise SystemExit(1) from exc
+
+        logger.info(
+            "PCAP analysis finished: %d packets processed",
+            packet_count,
+        )
+        return
+
     logger.info("Starting Python Network IDS")
-    start_capture(detector, interface=args.interface)
+    try:
+        start_capture(detector, interface=args.interface)
+    except (PermissionError, Scapy_Exception):
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
