@@ -1,43 +1,49 @@
 # Python Network Intrusion Detection System
 
-A modular, Python-based Network Intrusion Detection System (NIDS) that analyzes TCP SYN traffic, detects potential port scans and unusually high SYN traffic, and generates structured JSON reports.
+A modular Python-based Network Intrusion Detection System (NIDS) for
+monitoring TCP SYN traffic, identifying potential port scans and unusually
+high SYN traffic, and generating structured JSON reports.
 
-This project is an educational prototype for learning about packet analysis, intrusion detection, Python testing, and network security.
+This project is an educational prototype for learning about packet analysis,
+intrusion detection, Python testing, and network security.
+
+## Project Status
+
+The current package version is `0.1.0`. The project is under development and
+is not intended to replace a production-grade intrusion detection system.
+
+Detection rules use behavioral thresholds. An alert indicates suspicious
+activity and requires investigation; it does not prove that an attack occurred.
 
 ## Features
 
-- Live TCP packet capture using Scapy
+- Live packet capture using Scapy
 - Offline analysis of PCAP files
 - TCP SYN packet inspection
 - Port scan detection based on distinct destination ports
-- SYN flood detection based on SYN packet counts
+- SYN flood detection aggregated by source IP across destination IPs
 - Configurable thresholds and detection time windows
-- Security alerts with source and destination IP addresses
+- IPv4 and IPv6 address validation and canonicalization
+- Alerts containing source and destination IP addresses
 - JSON reports containing packet counts and detected alerts
 - Console and file-based logging
 - Command-line interface
-- Automated tests and input validation
-- Capture error handling
-
-## Technologies
-
-- Python 3.10+
-- Scapy
-- pytest
-- unittest
+- Automated tests and GitHub Actions integration
+- Input validation and capture error handling
 
 ## Requirements
 
 - Python 3.10 or newer
+- Scapy
 - Linux recommended for live packet capture
-- Appropriate privileges for capturing network traffic
+- Appropriate privileges to capture traffic on the selected interface
 
 ## Installation
 
-Clone the repository and enter the project directory:
+Clone the repository:
 
 ```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL>
+git clone https://github.com/htbuser7/python-network-ids.git
 cd python-network-ids
 ```
 
@@ -48,11 +54,11 @@ python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-Install the project and its dependencies:
+Install the project and development dependencies:
 
 ```bash
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
 ## Usage
@@ -65,19 +71,18 @@ python -m network_ids --list-interfaces
 
 ### Start live monitoring
 
-Choose a network interface available on your system:
+Choose an interface available on your system:
 
 ```bash
 sudo .venv/bin/python -m network_ids --interface eth0
 ```
 
-Replace `eth0` with your actual interface name. Live capture may require elevated privileges.
-
-Stop monitoring with `Ctrl+C`.
+Replace `eth0` with your actual interface name. Live capture may require
+elevated privileges. Stop monitoring with `Ctrl+C`.
 
 ### Configure detection rules
 
-Set the number of distinct destination ports required to trigger a port scan alert:
+Set the number of distinct destination ports required for a port scan alert:
 
 ```bash
 sudo .venv/bin/python -m network_ids \
@@ -103,7 +108,9 @@ sudo .venv/bin/python -m network_ids \
   --window 30
 ```
 
-The default port scan threshold is 10 distinct destination ports. The default SYN threshold is 100 packets. The default detection window is 60 seconds.
+The default port scan threshold is 10 distinct destination ports. The default
+SYN threshold is 100 packets, and the default detection window is 60 seconds.
+These values are configurable defaults, not universal production settings.
 
 ### Analyze a PCAP file
 
@@ -116,21 +123,33 @@ python -m network_ids \
 
 ### Generate a JSON report
 
-Specify an output path for the analysis report:
+Create a directory for reports and specify the report path:
 
 ```bash
+mkdir -p reports
+
 python -m network_ids \
   --pcap samples/demo_port_scan.pcap \
   --report reports/demo_report.json
 ```
 
-The report includes the number of packets analyzed, the number of alerts, and the details of each alert.
+Inspect the report:
+
+```bash
+cat reports/demo_report.json
+```
+
+The report includes the number of packets analyzed, the number of alerts,
+and the details of each alert.
 
 ### Demonstrate both detection rules
 
-The included sample capture contains three TCP SYN packets directed at three distinct destination ports. The following command configures both detection thresholds to three:
+The included sample capture contains three TCP SYN packets directed at three
+distinct destination ports. Use lower thresholds to demonstrate both rules:
 
 ```bash
+mkdir -p reports
+
 python -m network_ids \
   --pcap samples/demo_port_scan.pcap \
   --report reports/demo_both_rules_report.json \
@@ -138,27 +157,50 @@ python -m network_ids \
   --syn-threshold 3
 ```
 
-Inspect the resulting JSON report:
+Inspect the resulting report:
 
 ```bash
 cat reports/demo_both_rules_report.json
 ```
 
-The expected result is three analyzed packets and two alerts: `SYN_FLOOD` and `PORT_SCAN`.
+The expected result for this sample is three analyzed packets and two alerts:
+`SYN_FLOOD` and `PORT_SCAN`.
 
-These thresholds are deliberately low for demonstration purposes; they are not recommended production settings.
+These thresholds are deliberately low for demonstration purposes and are
+not recommended production settings.
 
 ## Detection Rules
 
 ### PORT_SCAN
 
-Tracks distinct TCP destination ports for each source and destination IP pair within the configured time window. An alert is generated when the number of distinct ports reaches the configured threshold.
+Tracks distinct TCP destination ports for each source IP and destination IP
+pair within the configured time window. An alert is generated when the
+number of distinct destination ports reaches the configured threshold.
+
+Repeated observations of the same destination port do not increase the
+distinct-port count.
 
 ### SYN_FLOOD
 
-Tracks TCP SYN packets for each source and destination IP pair within the configured time window. An alert is generated when the SYN packet count reaches the configured threshold.
+Counts TCP SYN observations from each source IP across all destination IPs
+within the configured time window. An alert is generated when the number of
+observations from one source reaches the configured SYN threshold.
 
-Both rules can trigger on the same packet observation. Each rule maintains its own alert state, allowing alerts to be generated independently.
+The destination in the alert identifies the destination associated with the
+observation that triggered it. Both detection rules can trigger on the same
+observation and maintain their own alert state.
+
+A SYN packet count alone does not confirm a SYN flood. Alerts require
+investigation and, where possible, additional network evidence.
+
+## Input Validation and Timestamps
+
+The detection engine validates IPv4 and IPv6 addresses and canonicalizes
+their textual representations. Invalid addresses, invalid destination
+ports, and non-finite timestamps are rejected.
+
+For consistent window calculations, timestamps must be non-decreasing for
+each source/destination pair and for each source IP's SYN flood observations.
 
 ## Logging
 
@@ -172,30 +214,49 @@ The `logs/` directory and log files are excluded from version control.
 
 ## Running Tests
 
-Activate the virtual environment, then run the full test suite:
+Activate the virtual environment and install the development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Run the full test suite:
 
 ```bash
 python -m pytest -v
 ```
 
-The tests cover detection rules, simultaneous alerts, packet processing, PCAP analysis, JSON reporting, command-line behavior, logging, and input validation.
+Tests cover detection rules, timestamp ordering, IP validation,
+false-positive scenarios, packet processing, PCAP analysis, JSON reporting,
+command-line behavior, logging, and capture errors.
+
+## Continuous Integration
+
+GitHub Actions runs the test suite when changes are pushed to `main` or a
+pull request targets `main`. The workflow can also be started manually.
+
+Review workflow results here:
+
+https://github.com/htbuser7/python-network-ids/actions
 
 ## Current Limitations
 
-- Detection focuses on TCP SYN traffic and simple behavioral thresholds.
-- A SYN packet count alone does not prove that a SYN flood is occurring; alerts require further investigation.
-- This is an educational prototype, not a replacement for a production-grade IDS.
+- Detection focuses on TCP SYN traffic and threshold-based rules.
+- Alerts can include false positives and require investigation.
+- Thresholds may need tuning for different network environments.
 - Live packet capture may require elevated privileges.
-- Detection thresholds may need tuning for different network environments.
+- Performance, resource usage, and long-running capture behavior need further
+  validation before a stable release.
+- This educational prototype has not been validated as a replacement for a
+  production-grade IDS.
 
 ## Responsible Use
 
-Only monitor networks and systems you own or are explicitly authorized to assess. Packet capture can expose sensitive network information.
-
-## Project Status
-
-Early development. Detection rules, reporting, and test coverage will continue to evolve.
+Only monitor networks and systems you own or are explicitly authorized to
+assess. Packet capture can expose sensitive network information.
 
 ## License
 
-No license has been specified yet. Add a license before distributing the project for reuse.
+No license has been selected yet. Do not assume the repository grants
+permission to redistribute or reuse its code. Select an appropriate license
+before the version 1.0 release.
