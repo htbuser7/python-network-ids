@@ -1,11 +1,14 @@
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from scapy.all import IP, TCP, UDP
 from scapy.error import Scapy_Exception
+from scapy.utils import PcapWriter
 
-from network_ids.capture import process_packet, start_capture
+from network_ids.capture import analyze_pcap, process_packet, start_capture
 from network_ids.detector import NetworkIDS
 
 
@@ -75,6 +78,28 @@ class TestPacketCapture(unittest.TestCase):
                 start_capture(self.ids, interface="eth0")
 
         mock_sniff.assert_called_once()
+
+    def test_analyze_pcap_counts_packets(self):
+        packet = IP(src="10.0.0.5", dst="10.0.0.10") / TCP(
+            sport=40000, dport=80, flags="S"
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pcap_path = Path(temp_dir) / "test.pcap"
+            writer = PcapWriter(str(pcap_path), sync=True)
+            writer.write(packet)
+            writer.close()
+
+            count = analyze_pcap(pcap_path, self.ids)
+
+        self.assertEqual(count, 1)
+
+    def test_analyze_missing_pcap_raises_error(self):
+        with self.assertRaises(OSError):
+            analyze_pcap(
+                "/nonexistent-directory/missing.pcap",
+                self.ids,
+            )
 
 
 if __name__ == "__main__":

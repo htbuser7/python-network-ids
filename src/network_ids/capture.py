@@ -1,11 +1,12 @@
-
-"""Capture TCP SYN packets and forward them to the IDS detector."""
+"""Capture live TCP traffic and analyze packets from PCAP files."""
 
 import logging
+from pathlib import Path
 
 from scapy.all import IP, TCP, sniff
 from scapy.error import Scapy_Exception
 from scapy.packet import Packet
+from scapy.utils import PcapReader
 
 from network_ids.detector import Alert, NetworkIDS
 
@@ -23,7 +24,7 @@ def process_packet(
     tcp = packet[TCP]
     flags = int(tcp.flags)
 
-    # Ignore packets that are not initial TCP SYN packets.
+    # Only process initial TCP SYN packets, not SYN-ACK packets.
     if not (flags & 0x02) or (flags & 0x10):
         return None
 
@@ -49,6 +50,38 @@ def process_packet(
         )
 
     return alert
+
+
+def analyze_pcap(
+    pcap_file: str | Path,
+    detector: NetworkIDS,
+) -> int:
+    """Analyze packets in a PCAP file and return the number of packets read."""
+    path = Path(pcap_file)
+
+    if not path.is_file():
+        raise FileNotFoundError(f"PCAP file not found: {path}")
+
+    packet_count = 0
+
+    logger.info("Starting PCAP analysis: %s", path)
+
+    try:
+        with PcapReader(str(path)) as reader:
+            for packet in reader:
+                packet_count += 1
+                process_packet(packet, detector)
+    except (Scapy_Exception, OSError):
+        logger.exception("Failed to analyze PCAP file: %s", path)
+        raise
+
+    logger.info(
+        "PCAP analysis completed: %s packets processed from %s",
+        packet_count,
+        path,
+    )
+
+    return packet_count
 
 
 def start_capture(
