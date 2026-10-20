@@ -61,9 +61,10 @@ class NetworkIDS:
         self._last_timestamps = {}
         self._alert_active = set()
 
-        # SYN_FLOOD state: one tracker per source IP, across destinations.
+        # SYN_FLOOD state: aggregate by source IP across destinations.
         self._syn_observations = defaultdict(deque)
         self._syn_alert_active = set()
+        self._last_syn_timestamps = {}
 
     def observe(
         self,
@@ -92,29 +93,36 @@ class NetworkIDS:
             raise ValueError("timestamp must be a finite number")
 
         key = (source_ip, destination_ip)
-        last_timestamp = self._last_timestamps.get(key)
 
+        # PORT_SCAN timestamps must be ordered per source/destination pair.
+        last_timestamp = self._last_timestamps.get(key)
         if last_timestamp is not None and now < last_timestamp:
             raise ValueError(
                 "timestamps must be non-decreasing per IP pair"
             )
 
+        # SYN_FLOOD aggregates destinations, so its timestamps must also
+        # be ordered across all observations from the same source IP.
+        last_syn_timestamp = self._last_syn_timestamps.get(source_ip)
+        if last_syn_timestamp is not None and now < last_syn_timestamp:
+            raise ValueError(
+                "timestamps must be non-decreasing per source IP "
+                "for SYN_FLOOD detection"
+            )
+
+        # Update timestamp state only after all ordering checks succeed.
         self._last_timestamps[key] = now
+        self._last_syn_timestamps[source_ip] = now
+
         cutoff = now - self.window_seconds
         alerts = []
 
-        # SYN_FLOOD: aggregate SYN observations by source IP.
-        # This includes packets sent to different destination IPs.
+        # SYN_FLOOD: count observations from this source across destinations.
         syn_observations = self._syn_observations[source_ip]
 
-        # Filter every entry instead of assuming timestamps from different
-        # destinations always arrive in chronological order.
-        syn_observations = deque(
-            observed_at
-            for observed_at in syn_observations
-            if observed_at >= cutoff
-        )
-        self._syn_observations[source_ip] = syn_observations
+        while syn_observations and syn_observations[0] < cutoff:
+            syn_observations.popleft()
+
         syn_observations.append(now)
 
         if len(syn_observations) < self.syn_threshold:
@@ -148,7 +156,7 @@ class NetworkIDS:
                 self.window_seconds,
             )
 
-        # PORT_SCAN: track unique destination ports per source/destination.
+        # PORT_SCAN: count unique destination ports for each IP pair.
         observations = self._observations[key]
 
         while observations and observations[0][0] < cutoff:
