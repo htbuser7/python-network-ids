@@ -1,4 +1,6 @@
 
+"""Detect basic network threats using TCP packet observations."""
+
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -17,13 +19,14 @@ class Alert:
 
 
 class NetworkIDS:
-    """Detect basic TCP port scans in a sliding time window."""
+    """Detect TCP port scans and unusually high SYN traffic."""
 
     def __init__(
         self,
         port_threshold: int = 10,
         window_seconds: float = 60.0,
         logger: logging.Logger | None = None,
+        syn_threshold: int = 100,
     ) -> None:
         if (
             isinstance(port_threshold, bool)
@@ -42,13 +45,24 @@ class NetworkIDS:
                 "window_seconds must be a finite positive number"
             )
 
+        if (
+            isinstance(syn_threshold, bool)
+            or not isinstance(syn_threshold, int)
+            or syn_threshold < 2
+        ):
+            raise ValueError("syn_threshold must be an integer >= 2")
+
         self.port_threshold = port_threshold
         self.window_seconds = float(window_seconds)
+        self.syn_threshold = syn_threshold
         self.logger = logger or logging.getLogger("network_ids")
 
         self._observations = defaultdict(deque)
         self._last_timestamps = {}
         self._alert_active = set()
+
+        self._syn_observations = defaultdict(deque)
+        self._syn_alert_active = set()
 
     def observe(
         self,
@@ -56,8 +70,8 @@ class NetworkIDS:
         destination_ip: str,
         destination_port: int,
         timestamp: float | None = None,
-    ) -> Alert | None:
-        """Record a connection and detect possible port scans."""
+    ) -> list[Alert]:
+        """Record a TCP SYN observation and return every new alert."""
         if (
             isinstance(destination_port, bool)
             or not isinstance(destination_port, int)
@@ -85,25 +99,59 @@ class NetworkIDS:
             )
 
         self._last_timestamps[key] = now
-        observations = self._observations[key]
         cutoff = now - self.window_seconds
+        alerts = []
 
-        # Remove observations outside the sliding time window.
+        # Track SYN observations for the SYN_FLOOD rule.
+        syn_observations = self._syn_observations[key]
+        while syn_observations and syn_observations[0] < cutoff:
+            syn_observations.popleft()
+
+        syn_observations.append(now)
+
+        if len(syn_observations) < self.syn_threshold:
+            self._syn_alert_active.discard(key)
+
+        if (
+            len(syn_observations) >= self.syn_threshold
+            and key not in self._syn_alert_active
+        ):
+            self._syn_alert_active.add(key)
+
+            alert = Alert(
+                source_ip=source_ip,
+                destination_ip=destination_ip,
+                rule="SYN_FLOOD",
+                details=(
+                    f"{len(syn_observations)} TCP SYN packets observed "
+                    f"within {self.window_seconds:g} seconds"
+                ),
+            )
+            alerts.append(alert)
+
+            self.logger.warning(
+                "Possible SYN flood detected: source=%s destination=%s "
+                "syn_packets=%d window_seconds=%g",
+                alert.source_ip,
+                alert.destination_ip,
+                len(syn_observations),
+                self.window_seconds,
+            )
+
+        # Track unique destination ports for the PORT_SCAN rule.
+        observations = self._observations[key]
         while observations and observations[0][0] < cutoff:
             observations.popleft()
 
         unique_ports = {port for _, port in observations}
 
-        # Allow a new alert after the count falls below the threshold.
         if len(unique_ports) < self.port_threshold:
             self._alert_active.discard(key)
 
-        # Record each destination port only once in the current window.
         if destination_port not in unique_ports:
             observations.append((now, destination_port))
             unique_ports.add(destination_port)
 
-        # Generate one alert when the threshold is first crossed.
         if (
             len(unique_ports) >= self.port_threshold
             and key not in self._alert_active
@@ -119,6 +167,7 @@ class NetworkIDS:
                     f"observed within {self.window_seconds:g} seconds"
                 ),
             )
+            alerts.append(alert)
 
             self.logger.warning(
                 "Possible port scan detected: source=%s destination=%s "
@@ -129,6 +178,4 @@ class NetworkIDS:
                 self.window_seconds,
             )
 
-            return alert
-
-        return None
+        return alerts

@@ -1,0 +1,18 @@
+{
+  "packets_analyzed": 3,
+  "alert_count": 2,
+  "alerts": [
+    {
+      "source_ip": "10.0.0.5",
+      "destination_ip": "10.0.0.10",
+      "rule": "SYN_FLOOD",
+      "details": "3 TCP SYN packets observed within 60 seconds"
+    },
+    {
+      "source_ip": "10.0.0.5",
+      "destination_ip": "10.0.0.10",
+      "rule": "PORT_SCAN",
+      "details": "3 distinct destination ports observed within 60 seconds"
+    }
+  ]
+}

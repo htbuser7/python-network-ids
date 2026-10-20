@@ -3,6 +3,7 @@
 
 import argparse
 import logging
+import sys
 
 from scapy.all import get_if_list
 from scapy.error import Scapy_Exception
@@ -26,7 +27,13 @@ def parse_args() -> argparse.Namespace:
         "--threshold",
         type=int,
         default=10,
-        help="Distinct destination ports needed to trigger an alert (default: 10)",
+        help="Distinct destination ports needed to trigger PORT_SCAN (default: 10)",
+    )
+    parser.add_argument(
+        "--syn-threshold",
+        type=int,
+        default=100,
+        help="TCP SYN packets needed to trigger SYN_FLOOD (default: 100)",
     )
     parser.add_argument(
         "--window",
@@ -62,7 +69,7 @@ def main() -> None:
         return
 
     if args.report and not args.pcap:
-        print("--report requires --pcap", file=__import__("sys").stderr)
+        print("--report requires --pcap", file=sys.stderr)
         raise SystemExit(2)
 
     logger = configure_logging()
@@ -70,6 +77,7 @@ def main() -> None:
     try:
         detector = NetworkIDS(
             port_threshold=args.threshold,
+            syn_threshold=args.syn_threshold,
             window_seconds=args.window,
             logger=logger,
         )
