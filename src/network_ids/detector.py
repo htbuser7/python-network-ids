@@ -3,6 +3,7 @@
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from ipaddress import ip_address
 from math import isfinite
 from time import monotonic
 
@@ -66,6 +67,21 @@ class NetworkIDS:
         self._syn_alert_active = set()
         self._last_syn_timestamps = {}
 
+    @staticmethod
+    def _normalize_ip(address: str, field_name: str) -> str:
+        """Validate an IP address and return its canonical representation."""
+        if not isinstance(address, str):
+            raise ValueError(
+                f"{field_name} must be a valid IP address string"
+            )
+
+        try:
+            return ip_address(address).compressed
+        except ValueError as exc:
+            raise ValueError(
+                f"{field_name} must be a valid IP address"
+            ) from exc
+
     def observe(
         self,
         source_ip: str,
@@ -74,6 +90,13 @@ class NetworkIDS:
         timestamp: float | None = None,
     ) -> list[Alert]:
         """Record a TCP SYN observation and return every new alert."""
+
+        # Validate and canonicalize IPs before using them as dictionary keys.
+        source_ip = self._normalize_ip(source_ip, "source_ip")
+        destination_ip = self._normalize_ip(
+            destination_ip, "destination_ip"
+        )
+
         if (
             isinstance(destination_port, bool)
             or not isinstance(destination_port, int)
@@ -101,8 +124,8 @@ class NetworkIDS:
                 "timestamps must be non-decreasing per IP pair"
             )
 
-        # SYN_FLOOD aggregates destinations, so its timestamps must also
-        # be ordered across all observations from the same source IP.
+        # SYN_FLOOD aggregates destinations, so timestamps must also be
+        # ordered across all observations from the same source IP.
         last_syn_timestamp = self._last_syn_timestamps.get(source_ip)
         if last_syn_timestamp is not None and now < last_syn_timestamp:
             raise ValueError(
@@ -110,7 +133,7 @@ class NetworkIDS:
                 "for SYN_FLOOD detection"
             )
 
-        # Update timestamp state only after all ordering checks succeed.
+        # Update timestamp state only after all checks have succeeded.
         self._last_timestamps[key] = now
         self._last_syn_timestamps[source_ip] = now
 
@@ -156,7 +179,7 @@ class NetworkIDS:
                 self.window_seconds,
             )
 
-        # PORT_SCAN: count unique destination ports for each IP pair.
+        # PORT_SCAN: count unique destination ports per IP pair.
         observations = self._observations[key]
 
         while observations and observations[0][0] < cutoff:
